@@ -2,6 +2,7 @@
 
 Sequor is a local-first, lightweight workflow engine with DAG orchestration.
 It is designed as a practical `prefect-lite` core for file-based scientific and data pipelines.
+This project can be paired with Claude/Codex to define task-level pipelines and run them directly.
 
 ## Features
 
