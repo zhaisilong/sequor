@@ -1,0 +1,2 @@
+flows can aggregate upstream task outputs.
+this removes brittle scan the folder logic.

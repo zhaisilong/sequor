@@ -15,15 +15,16 @@ def utc_now_iso() -> str:
 @dataclass(slots=True)
 class TaskSpec:
     name: str
-    builder: str
-    processor: str
-    executor: str | None = None
+    task_type: str
+    planner: str | None = None
+    runner: str | None = None
     depends_on: list[str] = field(default_factory=list)
     config: dict[str, Any] = field(default_factory=dict)
     retry: int = 0
-    timeout: int | None = None
+    timeout: int | None = 600
     cache: bool = True
     enabled: bool = True
+    parallelism: int | None = None
 
 
 @dataclass(slots=True)
@@ -60,10 +61,3 @@ class FlowResult:
     started_at: str = field(default_factory=utc_now_iso)
     finished_at: str | None = None
     work_dir: Path | None = None
-
-
-@dataclass(slots=True)
-class FlowConfig:
-    name: str
-    fail_fast: bool = True
-    work_dir: str | None = None

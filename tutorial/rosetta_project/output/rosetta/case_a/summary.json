@@ -1,0 +1,11 @@
+{
+  "input_pdb": "/home/silong/codex/sequor/tutorial/rosetta_project/inputs/case_a.pdb",
+  "xml": "/home/silong/codex/sequor/tutorial/rosetta_project/templates/relax.xml",
+  "nstruct": 4,
+  "best": {
+    "tag": "case_a_0003",
+    "score": -115.444,
+    "rmsd": 2.483
+  },
+  "count": 4
+}

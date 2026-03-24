@@ -1,0 +1,3 @@
+sequor runs local workflows.
+this tutorial demonstrates dag execution.
+

@@ -16,9 +16,15 @@ def _cmd_validate(path: str) -> int:
 def _cmd_list_tasks(path: str) -> int:
     flow = load_flow_config(path)
     print(f"Flow: {flow.name}")
+    print(f"Default Parallelism: {flow.parallelism}")
     for t in flow.tasks:
         deps = ",".join(t.depends_on) if t.depends_on else "-"
-        print(f"- {t.name} (builder={t.builder}, processor={t.processor}, executor={t.executor or 'serial'}, deps={deps})")
+        planner = t.planner or t.task_type
+        runner = t.runner or t.task_type
+        parallelism = t.parallelism if t.parallelism is not None else flow.parallelism
+        print(
+            f"- {t.name} (task_type={t.task_type}, planner={planner}, runner={runner}, parallelism={parallelism}, deps={deps})"
+        )
     return 0
 
 
@@ -37,7 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="Run a pipeline")
     p_run.add_argument("pipeline")
-    p_run.add_argument("--work-dir", default=None, help="Override flow.work_dir from YAML")
+    p_run.add_argument(
+        "--work-dir", default=None, help="Override flow.work_dir from YAML"
+    )
 
     p_validate = sub.add_parser("validate", help="Validate a pipeline")
     p_validate.add_argument("pipeline")

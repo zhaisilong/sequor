@@ -8,7 +8,7 @@ from sequor.core.models import FlowResult, TaskSpec
 from sequor.core.runner import Runner
 from sequor.core.scheduler import Scheduler, validate_dag
 from sequor.core.states import FlowState, TaskState
-from sequor.tasks import bash_task, python_task  # noqa: F401
+from sequor.tasks import task_runtime  # noqa: F401
 from sequor.core import executor as _executor_registry  # noqa: F401
 
 
@@ -23,25 +23,36 @@ class Flow:
         tasks: list[TaskSpec],
         fail_fast: bool = True,
         work_dir: str | None = None,
+        output_dir: str | None = None,
         pipeline_dir: str | None = None,
+        parallelism: int = 4,
     ) -> None:
         self.name = name
         self.tasks = tasks
         self.fail_fast = fail_fast
         self.work_dir = work_dir
+        self.output_dir = output_dir
         self.pipeline_dir = pipeline_dir
+        self.parallelism = max(1, int(parallelism))
         validate_dag(tasks)
 
     def run(self) -> FlowResult:
         ctx = RunContext.create(
             self.name,
             base_work_dir=self.work_dir,
+            public_output_dir=self.output_dir,
             launch_cwd=str(Path.cwd()),
             pipeline_dir=self.pipeline_dir or str(Path.cwd()),
         )
+        ctx.state["flow_parallelism"] = self.parallelism
         runner = Runner(ctx)
         scheduler = Scheduler(self.tasks, fail_fast=self.fail_fast)
-        flow_result = FlowResult(flow_name=self.name, state=FlowState.RUNNING, run_id=ctx.run_id, work_dir=Path(ctx.work_dir))
+        flow_result = FlowResult(
+            flow_name=self.name,
+            state=FlowState.RUNNING,
+            run_id=ctx.run_id,
+            work_dir=Path(ctx.work_dir),
+        )
         flow_result.started_at = _utc_now()
 
         task_results = scheduler.run(runner.run_task)

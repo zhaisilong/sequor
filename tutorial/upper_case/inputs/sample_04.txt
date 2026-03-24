@@ -1,0 +1,2 @@
+yaml pipelines are easy to version.
+registry based plugins keep tasks extensible.

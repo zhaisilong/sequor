@@ -2,31 +2,16 @@ flow:
   name: rosetta_project_demo
   fail_fast: true
   work_dir: .sequor
+  output_dir: output
+  parallelism: 4
 
 tasks:
   - name: run_rosetta_mock
-    builder: bash
-    processor: bash
-    executor: parallel
+    task_type: shell_cmd
+    planner: csv_manifest
     depends_on: []
     cache: true
     config:
-      cmd: "python {pipeline_dir}/mock_rosetta.py --pdb {pdb} --xml {xml} --out_dir {output_dir}/rosetta/{case_id} --nstruct {nstruct}"
-      items:
-        - case_id: case_a
-          pdb: "{pipeline_dir}/inputs/case_a.pdb"
-          xml: "{pipeline_dir}/templates/relax.xml"
-          nstruct: 4
-        - case_id: case_b
-          pdb: "{pipeline_dir}/inputs/case_b.pdb"
-          xml: "{pipeline_dir}/templates/relax.xml"
-          nstruct: 4
-
-  - name: summarize_rosetta
-    builder: python
-    processor: python
-    executor: serial
-    depends_on: [run_rosetta_mock]
-    cache: true
-    config:
-      function: tutorial.rosetta_project.jobs.summarize_rosetta
+      manifest: cases.csv
+      item_id_field: case_id
+      cmd_template: "python {pipeline_dir}/mock_rosetta.py --pdb {pdb} --xml {xml} --out_dir {output_dir}/rosetta/{case_id} --nstruct {nstruct}"

@@ -1,6 +1,10 @@
-# Rosetta Project Starter (Mock)
+# Rosetta Project Tutorial (Mock)
 
-This tutorial starts a Rosetta-style workflow in Sequor without requiring Rosetta binaries.
+## What It Does
+
+- Loads case rows from `cases.csv` via `planner: csv_manifest`.
+- Runs one `shell_cmd` task (`run_rosetta_mock`) per case.
+- Produces per-case mock Rosetta outputs under `output/rosetta/`.
 
 ## Run
 
@@ -8,19 +12,31 @@ This tutorial starts a Rosetta-style workflow in Sequor without requiring Rosett
 ./sequor.sh validate tutorial/rosetta_project/pipeline.yaml
 ./sequor.sh list-tasks tutorial/rosetta_project/pipeline.yaml
 ./sequor.sh run tutorial/rosetta_project/pipeline.yaml
+python tutorial/rosetta_project/summarize.py
+```
+
+Optional cache check:
+
+```bash
 ./sequor.sh run tutorial/rosetta_project/pipeline.yaml
 ```
 
-The second run should hit cache for both tasks.
+Second run should cache-hit `run_rosetta_mock` when inputs/config remain stable.
 
-## What it simulates
+## Inputs
 
-- Each case consumes `pdb + xml`.
-- Per-case outputs include decoys, score files, and logs.
-- A downstream Python task aggregates best scores into JSON/TSV.
+- Manifest: `tutorial/rosetta_project/cases.csv`
+- Per-row fields used by command template: `case_id`, `pdb`, `xml`, `nstruct`
 
-## Key output paths
+## Outputs
 
-- Runtime output: `tutorial/rosetta_project/.sequor/runtime/output/`
-- Case outputs: `.../runtime/output/rosetta/<case_id>/`
-- Final report: `.../runtime/output/reports/rosetta_summary.tsv`
+- Case outputs: `tutorial/rosetta_project/output/rosetta/<case_id>/`
+- Summary reports (from standalone script):
+  - `tutorial/rosetta_project/output/reports/rosetta_summary.json`
+  - `tutorial/rosetta_project/output/reports/rosetta_summary.tsv`
+- Task manifests: `tutorial/rosetta_project/.sequor/tasks/run_rosetta_mock/`
+
+## Notes
+
+- Sequor runs the iter-heavy task; summary export is author-managed script logic.
+- Item timeout defaults to 600s unless overridden.

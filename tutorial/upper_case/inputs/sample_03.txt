@@ -1,0 +1,2 @@
+structured logs improve debugging.
+states help orchestration stay predictable.

@@ -11,7 +11,9 @@ def sha256_text(text: str) -> str:
 
 
 def canonical_json(data: Any) -> str:
-    return json.dumps(data, sort_keys=True, ensure_ascii=True, default=str, separators=(",", ":"))
+    return json.dumps(
+        data, sort_keys=True, ensure_ascii=True, default=str, separators=(",", ":")
+    )
 
 
 def sha256_obj(data: Any) -> str:

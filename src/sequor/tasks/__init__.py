@@ -1,1 +1,1 @@
-from sequor.tasks import bash_task, python_task  # noqa: F401
+from sequor.tasks import task_runtime  # noqa: F401

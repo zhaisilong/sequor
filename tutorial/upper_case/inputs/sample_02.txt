@@ -1,0 +1,2 @@
+python and bash tasks can be mixed.
+every item keeps traceable artifacts.

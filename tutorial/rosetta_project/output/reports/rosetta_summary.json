@@ -1,0 +1,14 @@
+[
+  {
+    "case": "case_a",
+    "best_score": -115.444,
+    "best_tag": "case_a_0003",
+    "nstruct": 4
+  },
+  {
+    "case": "case_b",
+    "best_score": -115.444,
+    "best_tag": "case_b_0003",
+    "nstruct": 4
+  }
+]

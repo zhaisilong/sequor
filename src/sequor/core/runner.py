@@ -1,16 +1,15 @@
 from __future__ import annotations
 
+import json
 import traceback
 from datetime import datetime, timezone
-import re
 from typing import Any
 
 from sequor.core.artifacts import write_manifest
-from sequor.core.cache import CacheStore
 from sequor.core.context import RunContext
 from sequor.core.logger import create_logger, log_json
 from sequor.core.models import ItemResult, TaskResult, TaskSpec
-from sequor.core.registry import get_builder, get_executor, get_processor
+from sequor.core.registry import get_executor, get_planner, get_runner
 from sequor.core.states import ItemState, TaskState
 from sequor.utils.hashing import sha256_obj
 
@@ -19,39 +18,21 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _processor_identity(processor: Any, spec: TaskSpec) -> str:
-    cls = processor.__class__
-    return spec.config.get("processor_version") or f"{cls.__module__}.{cls.__name__}"
-
-
-def _item_key(task_name: str, arg: dict, config: dict, processor_id: str) -> str:
-    key_arg = {k: v for k, v in arg.items() if k != "run_dir"}
-    return sha256_obj(
-        {
-            "task": task_name,
-            "arg": key_arg,
-            "config": config,
-            "processor": processor_id,
-        }
-    )
-
-
-def _safe_item_id(raw: str) -> str:
-    safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("._")
-    if not safe:
-        return "item"
-    return safe[:120]
+def _normalize_item_id(item_id: str) -> str:
+    value = item_id.strip()
+    if not value:
+        raise ValueError("item_id cannot be empty")
+    if any(ch.isspace() for ch in value):
+        raise ValueError(f"item_id contains whitespace: {item_id!r}")
+    return value
 
 
 class Runner:
     def __init__(self, ctx: RunContext) -> None:
         self.ctx = ctx
-        self.cache = CacheStore(ctx.cache_dir)
 
     def run_task(self, spec: TaskSpec) -> TaskResult:
-        started_at = _utc_now()
-        task_result = TaskResult(task_name=spec.name, state=TaskState.RUNNING, started_at=started_at)
-        task_logger = create_logger(self.ctx.logs_dir / f"{spec.name}.log")
+        task_result = TaskResult(task_name=spec.name, state=TaskState.RUNNING, started_at=_utc_now())
 
         if not spec.enabled:
             task_result.state = TaskState.SKIPPED
@@ -59,88 +40,126 @@ class Runner:
             task_result.stats = {"total": 0, "success": 0, "failed": 0, "cached": 0}
             return task_result
 
-        builder = get_builder(spec.builder)()
-        processor = get_processor(spec.processor)()
-        executor_name = spec.executor or "serial"
-        executor = get_executor(executor_name)()
+        planner_name = spec.planner or spec.task_type
+        runner_name = spec.runner or spec.task_type
+        is_script_task = runner_name == "script" or spec.task_type == "script"
+        task_logger = None if is_script_task else create_logger(self.ctx.logs_dir / f"{spec.name}.log")
+        planner = get_planner(planner_name)()
+        item_runner = get_runner(runner_name)()
+        planned = planner.plan(spec, self.ctx)
+        if not isinstance(planned, list):
+            raise ValueError(f"planner {planner_name} must return list, got {type(planned)}")
 
-        args_list = builder.build(spec, self.ctx)
-        processor_id = _processor_identity(processor, spec)
+        seen: set[str] = set()
+        normalized_items: list[dict[str, Any]] = []
+        for idx, item in enumerate(planned):
+            if not isinstance(item, dict):
+                raise ValueError(f"task {spec.name} planned item #{idx} must be dict")
+            if "item_id" not in item:
+                raise ValueError(f"task {spec.name} planned item #{idx} missing required item_id")
+            item_id = _normalize_item_id(str(item["item_id"]))
+            if item_id in seen:
+                raise ValueError(f"task {spec.name} has duplicate item_id: {item_id}")
+            seen.add(item_id)
+            arg = item.get("arg")
+            if arg is None:
+                arg = {k: v for k, v in item.items() if k != "item_id"}
+            if not isinstance(arg, dict):
+                raise ValueError(f"task {spec.name} item {item_id} arg must be dict")
+            normalized_items.append({"item_id": item_id, "arg": dict(arg)})
 
-        def run_one(arg: dict) -> ItemResult:
-            raw_id = str(arg.get("item_id") or arg.get("input_name") or sha256_obj(arg)[:8])
-            item_id = _safe_item_id(raw_id)
-            item_dir = self.ctx.work_dir / "tasks" / spec.name / "items" / item_id
-            item_dir.mkdir(parents=True, exist_ok=True)
-            arg = {**arg, "item_id": item_id, "run_dir": str(item_dir)}
-            key = _item_key(spec.name, arg, spec.config, processor_id)
-            if spec.cache and self.cache.exists(key):
-                cached = self.cache.get(key) or {}
-                res = ItemResult(
-                    item_id=item_id,
-                    state=ItemState.CACHED,
-                    success=True,
-                    cached=True,
-                    output=cached.get("output"),
-                    artifacts=cached.get("artifacts", []),
-                    meta={"cache_key": key, "cache_hit": True, "cached_from": cached.get("cached_at")},
-                    started_at=_utc_now(),
-                    finished_at=_utc_now(),
-                )
-                write_manifest(item_dir / "manifest.json", {"state": res.state, "cached": True, "meta": res.meta, "arg": arg})
-                return res
+        workers = spec.parallelism
+        if workers is None:
+            workers = int(self.ctx.state.get("flow_parallelism", 4))
+        workers = max(1, int(workers))
+        executor_cls = get_executor("parallel" if workers > 1 else "serial")
+        executor = executor_cls(max_workers=workers) if workers > 1 else executor_cls()
+
+        task_root = self.ctx.work_dir / "tasks" / spec.name
+        manifests_dir = task_root / "manifests"
+        if not is_script_task:
+            manifests_dir.mkdir(parents=True, exist_ok=True)
+
+        def _cache_fingerprint(arg: dict[str, Any]) -> str:
+            key_arg = {k: v for k, v in arg.items() if k != "run_dir"}
+            return sha256_obj({"arg": key_arg, "runner": runner_name, "task_type": spec.task_type})
+
+        def run_one(item: dict[str, Any]) -> ItemResult:
+            item_id = item["item_id"]
+            arg = dict(item["arg"])
+            arg["item_id"] = item_id
+
+            manifest_path = manifests_dir / f"{item_id}.json" if not is_script_task else None
+            cache_fingerprint = _cache_fingerprint(arg)
+            if spec.cache and manifest_path is not None and manifest_path.exists():
+                try:
+                    prev = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    prev = {}
+                if (
+                    prev.get("success") is True
+                    and str(prev.get("cache_fingerprint", "")) == cache_fingerprint
+                ):
+                    return ItemResult(
+                        item_id=item_id,
+                        state=ItemState.CACHED,
+                        success=True,
+                        cached=True,
+                        output=prev.get("output"),
+                        artifacts=prev.get("artifacts", []),
+                        meta={
+                            "cache_hit": True,
+                            "cache_source": str(manifest_path),
+                            "cache_fingerprint": cache_fingerprint,
+                        },
+                        started_at=_utc_now(),
+                        finished_at=_utc_now(),
+                    )
 
             started = _utc_now()
             try:
-                res = processor.process(arg=arg, spec=spec, ctx=self.ctx)
+                out = item_runner.run(arg=arg, spec=spec, ctx=self.ctx)
+                if isinstance(out, ItemResult):
+                    res = out
+                else:
+                    res = ItemResult(
+                        item_id=item_id,
+                        state=ItemState.SUCCESS,
+                        success=True,
+                        output=out,
+                    )
+                res.item_id = str(res.item_id or item_id)
                 res.started_at = res.started_at or started
                 res.finished_at = res.finished_at or _utc_now()
-                if spec.cache and res.success:
-                    payload = {
-                        "task_name": spec.name,
-                        "item_id": item_id,
-                        "output": res.output,
-                        "artifacts": res.artifacts,
-                        "meta": res.meta,
-                        "cached_at": _utc_now(),
-                    }
-                    self.cache.set(
-                        key,
-                        payload,
-                        index_entry={
-                            "run_id": self.ctx.run_id,
-                            "task_name": spec.name,
+                payload = {
+                    "item_id": item_id,
+                    "state": str(res.state),
+                    "success": res.success,
+                    "cached": res.cached,
+                    "error": res.error,
+                    "arg": arg,
+                    "output": res.output,
+                    "artifacts": res.artifacts,
+                    "meta": res.meta,
+                    "runner": runner_name,
+                    "cache_fingerprint": cache_fingerprint,
+                    "started_at": res.started_at,
+                    "finished_at": res.finished_at,
+                }
+                if manifest_path is not None:
+                    write_manifest(manifest_path, payload)
+                if task_logger is not None:
+                    log_json(
+                        task_logger,
+                        {
+                            "event": "item_finished",
+                            "task": spec.name,
                             "item_id": item_id,
-                            "cache_key": key,
-                            "state": res.state,
+                            "state": str(res.state),
+                            "cached": res.cached,
+                            "error": res.error,
                         },
                     )
-                write_manifest(
-                    item_dir / "manifest.json",
-                    {
-                        "state": str(res.state),
-                        "success": res.success,
-                        "cached": res.cached,
-                        "error": res.error,
-                        "arg": arg,
-                        "output": res.output,
-                        "artifacts": res.artifacts,
-                        "meta": res.meta,
-                        "started_at": res.started_at,
-                        "finished_at": res.finished_at,
-                    },
-                )
-                log_json(
-                    task_logger,
-                    {
-                        "event": "item_finished",
-                        "task": spec.name,
-                        "item_id": item_id,
-                        "state": str(res.state),
-                        "cached": res.cached,
-                        "error": res.error,
-                    },
-                )
                 return res
             except Exception as exc:
                 finished = _utc_now()
@@ -154,12 +173,32 @@ class Runner:
                     started_at=started,
                     finished_at=finished,
                 )
-                write_manifest(item_dir / "manifest.json", {"state": "FAILED", "arg": arg, "error": err})
+                if manifest_path is not None:
+                    write_manifest(
+                        manifest_path,
+                        {
+                            "item_id": item_id,
+                            "state": "FAILED",
+                            "success": False,
+                            "cached": False,
+                            "arg": arg,
+                            "error": err,
+                            "runner": runner_name,
+                            "cache_fingerprint": cache_fingerprint,
+                            "started_at": started,
+                            "finished_at": finished,
+                        },
+                    )
                 return res
 
-        results = executor.run(args_list, run_one)
+        results = executor.run(normalized_items, run_one)
         task_result.item_results = results
         task_result.finished_at = _utc_now()
+        task_outputs = [
+            r.output for r in results if r.state in {ItemState.SUCCESS, ItemState.CACHED}
+        ]
+        self.ctx.state.setdefault("task_outputs", {})[spec.name] = task_outputs
+
         total = len(results)
         success = sum(1 for r in results if r.state in {ItemState.SUCCESS, ItemState.CACHED})
         failed = sum(1 for r in results if r.state == ItemState.FAILED)
@@ -175,23 +214,40 @@ class Runner:
         else:
             task_result.state = TaskState.SUCCESS
 
-        write_manifest(
-            self.ctx.work_dir / "tasks" / spec.name / "task_manifest.json",
-            {
-                "task": spec.name,
-                "state": str(task_result.state),
-                "stats": task_result.stats,
-                "started_at": task_result.started_at,
-                "finished_at": task_result.finished_at,
-            },
-        )
-        log_json(
-            task_logger,
-            {
-                "event": "task_finished",
-                "task": spec.name,
-                "state": str(task_result.state),
-                "stats": task_result.stats,
-            },
-        )
+        if not is_script_task:
+            items_index: dict[str, dict[str, Any]] = {}
+            for res in results:
+                item_id = str(res.item_id)
+                items_index[item_id] = {
+                    "manifest": f"manifests/{item_id}.json",
+                    "state": str(res.state),
+                    "success": res.success,
+                    "cached": res.cached,
+                    "error": res.error,
+                }
+            write_manifest(
+                task_root / "task_manifest.json",
+                {
+                    "task": spec.name,
+                    "task_type": spec.task_type,
+                    "planner": planner_name,
+                    "runner": runner_name,
+                    "parallelism": workers,
+                    "state": str(task_result.state),
+                    "stats": task_result.stats,
+                    "items": items_index,
+                    "started_at": task_result.started_at,
+                    "finished_at": task_result.finished_at,
+                },
+            )
+            if task_logger is not None:
+                log_json(
+                    task_logger,
+                    {
+                        "event": "task_finished",
+                        "task": spec.name,
+                        "state": str(task_result.state),
+                        "stats": task_result.stats,
+                    },
+                )
         return task_result

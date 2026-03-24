@@ -1,0 +1,1 @@
+mock_rosetta --pdb /home/silong/codex/sequor/tutorial/rosetta_project/inputs/case_a.pdb --xml /home/silong/codex/sequor/tutorial/rosetta_project/templates/relax.xml --nstruct 4

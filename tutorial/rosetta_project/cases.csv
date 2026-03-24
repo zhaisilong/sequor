@@ -1,0 +1,3 @@
+case_id,pdb,xml,nstruct
+case_a,{pipeline_dir}/inputs/case_a.pdb,{pipeline_dir}/templates/relax.xml,4
+case_b,{pipeline_dir}/inputs/case_b.pdb,{pipeline_dir}/templates/relax.xml,4

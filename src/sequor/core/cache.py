@@ -11,6 +11,7 @@ class CacheStore:
         self.cache_dir = cache_dir
         self.objects_dir = cache_dir / "objects"
         self.index_path = cache_dir / "index.jsonl"
+        self.latest_index_path = cache_dir / "index_latest.json"
         self._lock = threading.Lock()
         self.objects_dir.mkdir(parents=True, exist_ok=True)
 
@@ -32,5 +33,19 @@ class CacheStore:
             obj_dir.mkdir(parents=True, exist_ok=True)
             (obj_dir / "result.json").write_text(json.dumps(payload, indent=2, sort_keys=True))
             if index_entry:
-                with self.index_path.open("a", encoding="utf-8") as f:
-                    f.write(json.dumps(index_entry, sort_keys=True) + "\n")
+                latest: dict[str, Any] = {}
+                if self.latest_index_path.exists():
+                    try:
+                        latest = json.loads(self.latest_index_path.read_text(encoding="utf-8"))
+                    except json.JSONDecodeError:
+                        latest = {}
+                prev = latest.get(key)
+                latest[key] = index_entry
+                self.latest_index_path.write_text(
+                    json.dumps(latest, indent=2, sort_keys=True),
+                    encoding="utf-8",
+                )
+                # Avoid writing duplicate event lines when entry is unchanged.
+                if prev != index_entry:
+                    with self.index_path.open("a", encoding="utf-8") as f:
+                        f.write(json.dumps(index_entry, sort_keys=True) + "\n")

@@ -1,0 +1,2 @@
+cache makes reruns much faster.
+parallel executor handles independent items.

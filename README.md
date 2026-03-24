@@ -1,23 +1,8 @@
 # Sequor
 
-Sequor is a local-first, lightweight workflow engine with DAG orchestration.
-It is designed as a practical `prefect-lite` core for file-based scientific and data pipelines.
-This project can be paired with Claude/Codex to define task-level pipelines and run them directly.
-
-## Features
-
-- Declarative `Flow` + `Task` execution model
-- DAG validation and dependency scheduling
-- Task `builder / processor / executor` separation
-- `python` and `bash` task support
-- `serial` and `parallel` executors
-- Item-level results and task/flow states
-- Local cache for reruns + traceability manifests
-- YAML pipeline definitions and CLI runner
+Sequor is a local-first DAG workflow engine with a minimal two-stage runtime.
 
 ## Quick Start
-
-### 1. Run from source (no install required)
 
 ```bash
 ./sequor.sh validate tutorial/upper_case/pipeline.yaml
@@ -25,63 +10,68 @@ This project can be paired with Claude/Codex to define task-level pipelines and 
 ./sequor.sh run tutorial/upper_case/pipeline.yaml
 ```
 
-### 2. Optional editable install
+## Runtime Model
 
-```bash
-python -m pip install -e .
-sequor validate tutorial/upper_case/pipeline.yaml
+- `TaskPlanner.plan`: produce a list of planned items.
+- `TaskRunner.run`: execute one planned item.
+- Every item must provide `item_id`.
+
+## Core Behavior
+
+- Default parallelism is `flow.parallelism: 4`.
+- `task.parallelism` overrides flow-level parallelism.
+- Default item timeout is `600` seconds unless task overrides `timeout`.
+- Cache fingerprint excludes `config_hash` and `run_dir`.
+- Sequor does not auto-generate final summary reports; authors provide summary tasks/scripts.
+- `script` tasks can access context, but do not write task manifests/logs under `.sequor`.
+- Legacy `builder/processor/executor` schema is removed.
+
+## YAML (Current Schema)
+
+```yaml
+flow:
+  name: demo
+  fail_fast: true
+  parallelism: 4
+  work_dir: .sequor
+  output_dir: output
+
+tasks:
+  - name: step_a
+    task_type: python_fn
+    depends_on: []
+    cache: true
+    config:
+      function: some.module.fn
+      items:
+        - item_id: sample_1
+          input: a.txt
+
+  - name: step_b
+    task_type: shell_cmd
+    depends_on: [step_a]
+    timeout: 120
+    config:
+      default_item:
+        item_id: summarize
+        cmd: "python summarize.py"
 ```
 
-## Tutorials
+## Planner Inputs
 
-Two tutorials are included.
+Default planner (`python_fn` / `shell_cmd` / `script`) supports:
 
-### 1) `tutorial/upper_case`
+- `config.items`
+- `config.pattern` + `config.item_id_template`
+- `config.from_task` (expects upstream dict outputs carrying `item_id`)
+- `config.default_item`
 
-A minimal DAG pipeline:
-- Generate ~12 txt files
-- Uppercase each file in parallel
-- Summarize outputs
+`planner: csv_manifest` supports:
 
-Run:
-
-```bash
-./sequor.sh run tutorial/upper_case/pipeline.yaml
-./sequor.sh run tutorial/upper_case/pipeline.yaml
-```
-
-Second run should show cache hits.
-
-### 2) `tutorial/rosetta_project`
-
-A Rosetta-style starter workflow (mocked binary):
-- Per-case input: `pdb + xml`
-- Per-case outputs: logs, decoys, scores
-- Downstream aggregation report
-
-Run:
-
-```bash
-./sequor.sh run tutorial/rosetta_project/pipeline.yaml
-./sequor.sh run tutorial/rosetta_project/pipeline.yaml
-```
-
-## Repository Layout
-
-```text
-src/sequor/
-  core/      # flow, scheduler, runner, states, cache, context
-  tasks/     # python and bash task implementations
-  io/        # yaml parser and config loader
-  cli/       # command line entry
-  utils/     # hashing/import/path helpers
-
-tutorial/
-  upper_case/
-  rosetta_project/
-
-projects/    # local workspace placeholder (tracked only with .gitkeep)
-```
+- `config.manifest`
+- `config.item_id_field`
+- `config.defaults`
+- optional `config.cmd_template`
 
 ## CLI
 
@@ -91,18 +81,9 @@ projects/    # local workspace placeholder (tracked only with .gitkeep)
 ./sequor.sh run <pipeline.yaml>
 ```
 
-Optional:
+## Doc Map
 
-```bash
-./sequor.sh run <pipeline.yaml> --work-dir /abs/path/to/workdir
-```
-
-## Notes
-
-- Paths in YAML are resolved relative to the pipeline file directory.
-- Runtime outputs are written under each tutorial's `.sequor/` directory.
-- `.gitignore` excludes generated runtime/cache/bytecode artifacts.
-
-## Next Step: Real Rosetta Integration
-
-Use `tutorial/rosetta_project` as the template and replace `mock_rosetta.py` with real Rosetta command invocation while keeping the same Sequor task boundaries (`run_rosetta` -> `summarize`).
+- [Upper Case Tutorial](tutorial/upper_case/README.md)
+- [Rosetta Project Tutorial](tutorial/rosetta_project/README.md)
+- [USalign Default Project](projects/usalign/default/README.md)
+- [USalign CD47 Project](projects/usalign/cd47/README.md)

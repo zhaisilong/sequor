@@ -2,36 +2,26 @@ flow:
   name: upper_case_tutorial
   fail_fast: true
   work_dir: .sequor
+  output_dir: output
+  parallelism: 4
 
 tasks:
-  - name: generate_inputs
-    builder: python
-    processor: python
-    executor: serial
-    depends_on: []
-    cache: false
-    config:
-      function: tutorial.upper_case.jobs.generate_inputs
-      count: 12
-
   - name: uppercase
-    builder: python
-    processor: python
-    executor: parallel
-    depends_on: [generate_inputs]
+    task_type: python_fn
+    depends_on: []
     cache: true
     config:
       function: tutorial.upper_case.jobs.uppercase_file
-      pattern: "{input_dir}/source/*.txt"
+      pattern: "{pipeline_dir}/inputs/*.txt"
+      item_id_template: "{input_stem}"
       output_dir: "{output_dir}/upper"
-      output_suffix: ".txt"
-      include_input_hash: true
 
-  - name: summarize
-    builder: python
-    processor: python
-    executor: serial
+  - name: summary
+    task_type: shell_cmd
+    parallelism: 1
     depends_on: [uppercase]
-    cache: true
+    cache: false
     config:
-      function: tutorial.upper_case.jobs.summarize
+      default_item:
+        item_id: summary
+        cmd: "python {pipeline_dir}/summarize.py --output_dir {output_dir}/upper --summary_csv {output_dir}/summary.csv"
