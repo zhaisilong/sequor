@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sequor"
+version = "0.1.0"
+description = "A local-first lightweight DAG workflow engine"
+requires-python = ">=3.11"
+dependencies = [
+  "PyYAML>=6.0",
+  "p_tqdm>=1.4.2",
+]
+
+[project.scripts]
+sequor = "sequor.cli.main:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

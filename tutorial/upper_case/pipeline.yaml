@@ -1,0 +1,37 @@
+flow:
+  name: upper_case_tutorial
+  fail_fast: true
+  work_dir: .sequor
+
+tasks:
+  - name: generate_inputs
+    builder: python
+    processor: python
+    executor: serial
+    depends_on: []
+    cache: false
+    config:
+      function: tutorial.upper_case.jobs.generate_inputs
+      count: 12
+
+  - name: uppercase
+    builder: python
+    processor: python
+    executor: parallel
+    depends_on: [generate_inputs]
+    cache: true
+    config:
+      function: tutorial.upper_case.jobs.uppercase_file
+      pattern: "{input_dir}/source/*.txt"
+      output_dir: "{output_dir}/upper"
+      output_suffix: ".txt"
+      include_input_hash: true
+
+  - name: summarize
+    builder: python
+    processor: python
+    executor: serial
+    depends_on: [uppercase]
+    cache: true
+    config:
+      function: tutorial.upper_case.jobs.summarize

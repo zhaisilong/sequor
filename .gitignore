@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+
+# Build / packaging
+build/
+dist/
+*.egg-info/
+
+# Local env
+.venv/
+venv/
+
+# Sequor runtime outputs
+.sequor/
+tutorial/*/.sequor/
+tutorial/*/tutorial/
+
+# Local project workspace placeholder
+projects/*
+!projects/.gitkeep
