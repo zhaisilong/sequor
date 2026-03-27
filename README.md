@@ -84,6 +84,3 @@ Default planner (`python_fn` / `shell_cmd` / `script`) supports:
 ## Doc Map
 
 - [Upper Case Tutorial](tutorial/upper_case/README.md)
-- [Rosetta Project Tutorial](tutorial/rosetta_project/README.md)
-- [USalign Default Project](projects/usalign/default/README.md)
-- [USalign CD47 Project](projects/usalign/cd47/README.md)
